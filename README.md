@@ -1,5 +1,7 @@
 # Project 1 - Vigenere Cipher
 
+Project 1 for FCM 741 Applied Cryptography
+
 Uman Ranjha
 
 Run `chmod u+x keygen encrypt decrypt crack` first. All of them are Python 3 scripts.
