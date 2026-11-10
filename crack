@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""
+crack - break a byte-wise Vigenere ciphertext whose plaintext is English text.
+
+Usage:
+    ./crack <ciphertext_file> [max_key_length]
+
+Example:
+    ./crack mystery.enc
+
+Steps:
+  1. Find the key length with the Index of Coincidence (IC).
+  2. Recover each key byte with frequency analysis (each column of the
+     ciphertext is just a Caesar shift mod 256).
+  3. Decrypt and save the results.
+
+Outputs:
+    cracked.key  - the recovered key (raw bytes)
+    cracked.txt  - the recovered plaintext
+"""
+
+import sys
+from collections import Counter
+
+
+# ---------------------------------------------------------------------------
+# Step 1: key length via Index of Coincidence
+# ---------------------------------------------------------------------------
+
+def index_of_coincidence(data):
+    """
+    Probability that two bytes picked at random from `data` are equal.
+      - uniformly random bytes  ->  about 1/256 = 0.0039
+      - English text            ->  about 0.06 (letters and spaces repeat a lot)
+    """
+    n = len(data)
+    if n < 2:
+        return 0.0
+    counts = Counter(data)
+    return sum(c * (c - 1) for c in counts.values()) / (n * (n - 1))
+
+
+def average_ic(ciphertext, key_len):
+    """
+    Split the ciphertext into key_len columns (column i = bytes i, i+L, i+2L...).
+    If key_len is right, every byte in a column was shifted by the SAME key
+    byte, so the column keeps English's high IC. If it's wrong, the columns
+    mix different shifts and look random.
+    """
+    columns = [ciphertext[i::key_len] for i in range(key_len)]
+    return sum(index_of_coincidence(col) for col in columns) / key_len
+
+
+def find_key_length(ciphertext, max_len=200):
+    """Score every candidate length; return (best_length, all_scores)."""
+    scores = [(L, average_ic(ciphertext, L)) for L in range(1, max_len + 1)]
+    best_ic = max(ic for _, ic in scores)
+    # Multiples of the true length (2L, 3L...) score just as high, so pick
+    # the SMALLEST length that is within 5% of the best score.
+    for L, ic in scores:
+        if ic >= 0.95 * best_ic:
+            return L, scores
+
+
+# ---------------------------------------------------------------------------
+# Step 2: key bytes via frequency analysis
+# ---------------------------------------------------------------------------
+
+# Approximate English frequencies (percent). Space is the most common byte.
+ENGLISH_FREQ = {
+    ord(' '): 13.0, ord('e'): 12.0, ord('t'): 9.0, ord('a'): 8.0,
+    ord('o'): 7.5, ord('i'): 7.0, ord('n'): 6.7, ord('s'): 6.3,
+    ord('h'): 6.0, ord('r'): 5.9, ord('d'): 4.3, ord('l'): 4.0,
+    ord('u'): 2.8,
+}
+OTHER_OK = set(b"ABCDEFGHIJKLMNOPQRSTUVWXYZbcfgjkmpqvwxyz.,;:!?'\"-\n\r")
+
+
+def score_plaintext_byte(p):
+    """Higher score = looks more like English text."""
+    if p in ENGLISH_FREQ:
+        return ENGLISH_FREQ[p]
+    if p in OTHER_OK:
+        return 1.0
+    if p < 9 or 14 <= p < 32 or p == 127:   # control characters: very unlikely
+        return -5.0
+    return 0.0                               # digits, symbols, UTF-8 bytes
+
+
+def find_key_byte(column):
+    """Try all 256 shifts for one column; return the shift that looks most English."""
+    counts = Counter(column)  # count once, then score each shift quickly
+    best_k, best_score = 0, float("-inf")
+    for k in range(256):
+        score = sum(n * score_plaintext_byte((c - k) % 256) for c, n in counts.items())
+        if score > best_score:
+            best_k, best_score = k, score
+    return best_k
+
+
+def find_key(ciphertext, key_len):
+    return bytes(find_key_byte(ciphertext[i::key_len]) for i in range(key_len))
+
+
+# ---------------------------------------------------------------------------
+# Step 3: decrypt (same formula as ./decrypt)
+# ---------------------------------------------------------------------------
+
+def decrypt(ciphertext, key):
+    n = len(key)
+    return bytes((b - key[i % n]) % 256 for i, b in enumerate(ciphertext))
+
+
+def main():
+    if len(sys.argv) not in (2, 3):
+        sys.stderr.write("Usage: ./crack <ciphertext_file> [max_key_length]\n")
+        sys.exit(1)
+
+    max_len = int(sys.argv[2]) if len(sys.argv) == 3 else 200
+    with open(sys.argv[1], "rb") as f:
+        ciphertext = f.read()
+
+    print(f"Ciphertext size: {len(ciphertext)} bytes\n")
+
+    # Step 1
+    key_len, scores = find_key_length(ciphertext, max_len)
+    print("Step 1: Index of Coincidence by key length (top 10)")
+    print("        random bytes ~ 0.0039, English text ~ 0.06")
+    for L, ic in sorted(scores, key=lambda s: -s[1])[:10]:
+        print(f"    length {L:4d}   IC = {ic:.4f}")
+    print(f"\n  -> Key length = {key_len}\n")
+
+    # Step 2
+    key = find_key(ciphertext, key_len)
+    print("Step 2: Recovered key")
+    print(f"    hex:   {key.hex()}")
+    print(f"    ascii: {key!r}\n")
+
+    # Step 3
+    plaintext = decrypt(ciphertext, key)
+    with open("cracked.key", "wb") as f:
+        f.write(key)
+    with open("cracked.txt", "wb") as f:
+        f.write(plaintext)
+
+    print("Step 3: First 600 characters of the plaintext")
+    print("-" * 60)
+    print(plaintext[:600].decode("utf-8", errors="replace"))
+    print("-" * 60)
+    print("\nSaved key to cracked.key and plaintext to cracked.txt")
+
+
+if __name__ == "__main__":
+    main()

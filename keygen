@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""
+keygen - generate a cryptographically secure random key.
+
+Usage:
+    ./keygen <length_in_bytes> <keyfile>
+
+Example:
+    ./keygen 10 keyfilename
+
+The key is written as RAW bytes (not text), so view it with a hex
+viewer such as `xxd keyfilename`.
+"""
+
+import sys
+import secrets  # cryptographically secure RNG (uses the OS's /dev/urandom)
+
+
+def generate_key(n):
+    """Return n cryptographically secure random bytes."""
+    if n <= 0:
+        raise ValueError("key length must be a positive integer")
+    return secrets.token_bytes(n)
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.stderr.write("Usage: ./keygen <length_in_bytes> <keyfile>\n")
+        sys.exit(1)
+
+    try:
+        n = int(sys.argv[1])
+    except ValueError:
+        sys.stderr.write("Error: key length must be an integer\n")
+        sys.exit(1)
+
+    key = generate_key(n)
+
+    # 'wb' = write binary, so the file contains only the raw key bytes
+    with open(sys.argv[2], "wb") as f:
+        f.write(key)
+
+
+if __name__ == "__main__":
+    main()
